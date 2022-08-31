@@ -1,3 +1,5 @@
+use bevy::input::ButtonState;
+use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
 use bevy::time::FixedTimestep;
 use rand::prelude::random;
@@ -51,7 +53,8 @@ fn main() {
     .add_startup_system(setup_camera)
 
     // INPUT
-    .add_system(snake_input.before(snake_movement))
+    .add_system(key_input.before(snake_movement))
+    .add_event::<KeyboardInput>()
     .add_system(bevy::window::close_on_esc)
 
     // MOVEMENT
@@ -175,12 +178,12 @@ fn spawn_food(mut commands: Commands, positions: Query<&Position>) {
             if pos.x == x && pos.y == y {
                 x = (random::<u32>() % (ARENA_WIDTH as u32)) as i32;
                 y = (random::<u32>() % (ARENA_HEIGHT as u32)) as i32;
-                info!("overlap");
+                // info!("overlap");
                 overlap = true;
             }
         }
     }
-    info!("no overlap");
+    // info!("no overlap");
     commands.spawn_bundle(
         SpriteBundle {
             sprite: Sprite {
@@ -235,7 +238,7 @@ impl Size {
     }
 }
 
-#[derive(PartialEq, Copy, Clone, Default)]
+#[derive(PartialEq, Copy, Clone, Default, Debug)]
 enum Direction {
     #[default]
     Up,
@@ -308,19 +311,30 @@ fn spawn_segment(mut commands: Commands, position: Position) -> Entity {
 // movement system
 fn snake_movement(
     segments: ResMut<SnakeSegments>,
-    mut heads: Query<(Entity, &SnakeHead)>,
+    last_input: Res<LastUserInput>,
+    mut heads: Query<(Entity, &mut SnakeHead)>,
     mut positions: Query<&mut Position>,
     mut last_tail_position: ResMut<LastTailPosition>,
     mut game_over_writer: EventWriter<GameOverEvent>
 )   {
-    if let Some((head_entity, head)) = heads.iter_mut().next() {
+    if let Some((head_entity, mut head)) = heads.iter_mut().next() {
+
         let segment_positions = segments
             .iter()
             .map(|entity| *positions.get_mut(*entity).unwrap())
             .collect::<Vec<Position>>();
+
         let mut head_pos = positions.get_mut(head_entity).unwrap();
+
         *last_tail_position = LastTailPosition(Some(*segment_positions.last().unwrap()));
-        match &head.direction {
+
+        let mut dir: Direction = last_input.0;
+        if dir == head.direction.opposite() {
+            dir = head.direction;
+        }
+
+        head.direction = dir;
+        match dir {
             Direction::Left => {
                 head_pos.x -= STEP_SIZE;
                 if head_pos.x < 0 {
@@ -346,10 +360,13 @@ fn snake_movement(
                 }
             }
         };
+
         // info!("{}, {}", head_pos.x, head_pos.y);
+
         if segment_positions.contains(&head_pos) {
             game_over_writer.send(GameOverEvent);
         }
+
         segment_positions
             .iter()
             .zip(segments.iter().skip(1))
@@ -362,26 +379,21 @@ fn snake_movement(
 #[derive(Default)]
 struct LastUserInput(Direction);
 
-// input system
-fn snake_input(
-    input: Res<Input<KeyCode>>,
-    mut heads: Query<&mut SnakeHead>
-)   {
-    if let Some(mut head) = heads.iter_mut().next() {
-        let dir: Direction = if input.pressed(KeyCode::Left) {
-            Direction::Left
-        } else if input.pressed(KeyCode::Right) {
-            Direction::Right
-        } else if input.pressed(KeyCode::Up) {
-            Direction::Up
-        } else if input.pressed(KeyCode::Down) {
-            Direction::Down
-        } else {
-            head.direction
+fn key_input(mut key_evr: EventReader<KeyboardInput>, mut last_input: ResMut<LastUserInput>) {
+    for ev in key_evr.iter() {
+        match ev.state {
+            ButtonState::Pressed => {
+                info!("Pressed: {:?}", ev.key_code.unwrap());
+                last_input.0 = match ev.key_code.unwrap() {
+                    KeyCode::Left => Direction::Left,
+                    KeyCode::Right => Direction::Right,
+                    KeyCode::Up => Direction::Up,
+                    KeyCode::Down => Direction::Down,
+                    _ => last_input.0,
+                };
+            }
+            ButtonState::Released => ()
         };
-        if dir != head.direction.opposite() {
-            head.direction = dir;
-        }
     }
 }
 
